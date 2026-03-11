@@ -11,9 +11,13 @@ A client-side webapp to compare two [Lighthouse](https://developer.chrome.com/do
 - **Audit comparison table** — full audit-level diff with display values from both reports
 - **Filter & search** — quickly narrow the audit table by delta status or audit name
 
+## Live Demo
+
+The app is deployed to GitHub Pages: **https://stevejrobertson.github.io/lighthouse-compare/**
+
 ## Usage
 
-1. Open `index.html` in any modern browser (no build step required).
+1. Visit the [live demo](https://stevejrobertson.github.io/lighthouse-compare/) or open `index.html` locally in any modern browser (no build step required).
 2. Drop or select your **Report A** Lighthouse JSON file.
 3. Drop or select your **Report B** Lighthouse JSON file.
 4. Click **Compare reports**.
