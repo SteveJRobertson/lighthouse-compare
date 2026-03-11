@@ -1,6 +1,6 @@
 # lighthouse-compare
 
-A client-side webapp to compare two [Lighthouse](https://developer.chrome.com/docs/lighthouse/overview/) JSON reports and display the differences in a visual manner.
+A client-side webapp to compare two <a href="https://developer.chrome.com/docs/lighthouse/overview/" target="_blank" rel="noopener noreferrer">Lighthouse</a> JSON reports and display the differences in a visual manner.
 
 ## Features
 
@@ -13,11 +13,11 @@ A client-side webapp to compare two [Lighthouse](https://developer.chrome.com/do
 
 ## Live Demo
 
-The app is deployed to GitHub Pages: **https://stevejrobertson.github.io/lighthouse-compare/**
+The app is deployed to GitHub Pages: <a href="https://stevejrobertson.github.io/lighthouse-compare/" target="_blank" rel="noopener noreferrer">https://stevejrobertson.github.io/lighthouse-compare/</a>
 
 ## Usage
 
-1. Visit the [live demo](https://stevejrobertson.github.io/lighthouse-compare/) or open `index.html` locally in any modern browser (no build step required).
+1. Visit the <a href="https://stevejrobertson.github.io/lighthouse-compare/" target="_blank" rel="noopener noreferrer">live demo</a> or open `index.html` locally in any modern browser (no build step required).
 2. Drop or select your **Report A** Lighthouse JSON file.
 3. Drop or select your **Report B** Lighthouse JSON file.
 4. Click **Compare reports**.

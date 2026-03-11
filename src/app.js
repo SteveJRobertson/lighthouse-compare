@@ -483,7 +483,7 @@ function renderAuditRow(audit) {
   return `<tr class="audit-row" data-delta="${delta.className}" data-title="${escapeHtml(title.toLowerCase())}">
     <td class="audit-table__name">
       <button class="audit-expand-btn" aria-expanded="false" title="Show details">▼</button>
-      <span title="${escapeHtml(description)}">${escapeHtml(title)}</span>
+      <span title="${escapeHtml(description.replace(/\[([^\]]*)\]\([^)]*\)/g, '$1'))}">${escapeHtml(title)}</span>
     </td>
     <td class="audit-table__score">
       <span class="score-badge score-badge--${getScoreClass(scoreA)}">${formatScore(scoreA)}</span>
@@ -502,7 +502,7 @@ function renderAuditDetailRow(audit) {
   const { description, explanation, summary } = audit;
   return `<tr class="audit-detail-row" hidden>
     <td colspan="6" class="audit-detail-cell">
-      ${description ? `<p class="audit-detail__description">${escapeHtml(description)}</p>` : ''}
+      ${description ? `<p class="audit-detail__description">${markdownLinksToHtml(description)}</p>` : ''}
       ${explanation ? `<p class="audit-detail__explanation"><strong>Explanation:</strong> ${escapeHtml(explanation)}</p>` : ''}
       <p class="audit-detail__summary">${escapeHtml(summary)}</p>
     </td>
@@ -517,6 +517,29 @@ function escapeHtml(str) {
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
     .replace(/'/g, '&#39;');
+}
+
+/**
+ * Converts markdown-format links ([text](url)) in a string to HTML anchor tags.
+ * Non-link text is HTML-escaped. Only http:// and https:// URLs are allowed.
+ * @param {string} str
+ * @returns {string}
+ */
+function markdownLinksToHtml(str) {
+  if (!str) return '';
+  const mdLinkRe = /\[([^\]]*)\]\((https?:\/\/[^)]+)\)/g;
+  let result = '';
+  let lastIndex = 0;
+  let match;
+  while ((match = mdLinkRe.exec(str)) !== null) {
+    result += escapeHtml(str.slice(lastIndex, match.index));
+    const linkText = escapeHtml(match[1]);
+    const escapedUrl = escapeHtml(match[2]);
+    result += `<a href="${escapedUrl}" target="_blank" rel="noopener noreferrer">${linkText}</a>`;
+    lastIndex = match.index + match[0].length;
+  }
+  result += escapeHtml(str.slice(lastIndex));
+  return result;
 }
 
 function formatDate(isoString) {
@@ -648,6 +671,7 @@ if (typeof module !== 'undefined') {
     compareReports,
     getCategoryForAudit,
     escapeHtml,
+    markdownLinksToHtml,
     formatDate,
   };
 }

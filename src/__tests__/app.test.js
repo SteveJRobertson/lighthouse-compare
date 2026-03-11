@@ -10,6 +10,7 @@ const {
   compareReports,
   getCategoryForAudit,
   escapeHtml,
+  markdownLinksToHtml,
   formatDate,
 } = require('../app');
 
@@ -456,5 +457,56 @@ describe('formatDate', () => {
     expect(formatDate('')).toBe('');
     expect(formatDate(null)).toBe('');
     expect(formatDate(undefined)).toBe('');
+  });
+});
+
+// ── markdownLinksToHtml ───────────────────────────────────────────────────────
+
+describe('markdownLinksToHtml', () => {
+  it('converts a markdown link to an HTML anchor tag', () => {
+    expect(markdownLinksToHtml('[Learn more](https://example.com)')).toBe(
+      '<a href="https://example.com" target="_blank" rel="noopener noreferrer">Learn more</a>',
+    );
+  });
+
+  it('converts multiple markdown links in a string', () => {
+    const input = 'See [docs](https://docs.example.com) and [guide](https://guide.example.com).';
+    const result = markdownLinksToHtml(input);
+    expect(result).toBe(
+      'See <a href="https://docs.example.com" target="_blank" rel="noopener noreferrer">docs</a> and <a href="https://guide.example.com" target="_blank" rel="noopener noreferrer">guide</a>.',
+    );
+  });
+
+  it('escapes HTML in surrounding non-link text', () => {
+    const result = markdownLinksToHtml('<b>Check</b> [this](https://example.com)');
+    expect(result).toBe(
+      '&lt;b&gt;Check&lt;/b&gt; <a href="https://example.com" target="_blank" rel="noopener noreferrer">this</a>',
+    );
+  });
+
+  it('escapes HTML special characters in link text', () => {
+    const result = markdownLinksToHtml('[<b>text</b>](https://example.com)');
+    expect(result).toBe(
+      '<a href="https://example.com" target="_blank" rel="noopener noreferrer">&lt;b&gt;text&lt;/b&gt;</a>',
+    );
+  });
+
+  it('does not convert non-http/https URLs', () => {
+    const input = '[click](javascript:alert(1)) safe text';
+    const result = markdownLinksToHtml(input);
+    expect(result).not.toContain('<a');
+    expect(result).toContain('[click](javascript:alert(1))');
+  });
+
+  it('returns HTML-escaped plain text when there are no markdown links', () => {
+    expect(markdownLinksToHtml('Hello <world> & everyone')).toBe(
+      'Hello &lt;world&gt; &amp; everyone',
+    );
+  });
+
+  it('returns empty string for falsy input', () => {
+    expect(markdownLinksToHtml('')).toBe('');
+    expect(markdownLinksToHtml(null)).toBe('');
+    expect(markdownLinksToHtml(undefined)).toBe('');
   });
 });
