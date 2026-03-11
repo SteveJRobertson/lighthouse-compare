@@ -65,6 +65,102 @@ function scoreDelta(scoreA, scoreB) {
 }
 
 /**
+ * Formats a raw Lighthouse numeric value with its unit into a human-readable string.
+ * @param {number} value
+ * @param {string} numericUnit - Lighthouse unit string (e.g. 'millisecond', 'byte')
+ * @returns {string}
+ */
+function formatNumeric(value, numericUnit) {
+  if (numericUnit === 'millisecond') {
+    if (value >= 1000) return `${parseFloat((value / 1000).toFixed(2))} s`;
+    return `${Math.round(value)} ms`;
+  }
+  if (numericUnit === 'byte') {
+    if (value >= 1024 * 1024) return `${(value / (1024 * 1024)).toFixed(1)} MB`;
+    if (value >= 1024) return `${(value / 1024).toFixed(1)} KB`;
+    return `${Math.round(value)} bytes`;
+  }
+  if (numericUnit === 'second') return `${parseFloat(value.toFixed(2))} s`;
+  if (!numericUnit) return String(Math.round(value));
+  return `${Math.round(value)} ${numericUnit}`;
+}
+
+/**
+ * Generates a human-readable sentence describing an audit change between two reports.
+ * @param {object} audit - An audit comparison entry (subset of compareReports output)
+ * @returns {string}
+ */
+function describeChange(audit) {
+  const {
+    scoreA,
+    scoreB,
+    displayValueA,
+    displayValueB,
+    numericValueA,
+    numericValueB,
+    numericUnit,
+    delta,
+  } = audit;
+
+  // Audit only appears in Report B (new)
+  if (scoreA === null && scoreB !== null) {
+    const pct = formatScore(scoreB);
+    const val = displayValueB ? ` (${displayValueB})` : '';
+    return `New in Report B — scored ${pct}${val}.`;
+  }
+
+  // Audit only appears in Report A (removed in B)
+  if (scoreB === null && scoreA !== null) {
+    const pct = formatScore(scoreA);
+    const val = displayValueA ? ` (${displayValueA})` : '';
+    return `Not present in Report B — was scored ${pct}${val}.`;
+  }
+
+  // Both null (informational / not applicable)
+  if (scoreA === null && scoreB === null) {
+    return 'Not applicable in either report.';
+  }
+
+  const pctA = formatScore(scoreA);
+  const pctB = formatScore(scoreB);
+
+  // Numeric metric comparison (e.g. FCP: 500 ms → 300 ms)
+  let metricDesc = '';
+  if (
+    numericValueA !== null &&
+    numericValueB !== null &&
+    Math.round(numericValueA) !== Math.round(numericValueB)
+  ) {
+    const a = formatNumeric(numericValueA, numericUnit);
+    const b = formatNumeric(numericValueB, numericUnit);
+    const diff = numericValueB - numericValueA;
+    const diffAbs = formatNumeric(Math.abs(diff), numericUnit);
+    const arrow = diff < 0 ? '↓' : '↑';
+    metricDesc = ` Metric: ${a} → ${b} (${arrow}\u2009${diffAbs}).`;
+  }
+
+  const deltaPoints = Math.abs(Math.round((scoreB - scoreA) * 100));
+
+  if (delta.className === 'delta-positive') {
+    return `Score improved by ${deltaPoints} point${deltaPoints !== 1 ? 's' : ''} (${pctA} → ${pctB}).${metricDesc}`;
+  }
+
+  if (delta.className === 'delta-negative') {
+    return `Score regressed by ${deltaPoints} point${deltaPoints !== 1 ? 's' : ''} (${pctA} → ${pctB}).${metricDesc}`;
+  }
+
+  // Neutral — surface value-only changes
+  if (metricDesc) return `Score unchanged at ${pctA}.${metricDesc}`;
+
+  const valueChanged = displayValueA && displayValueB && displayValueA !== displayValueB;
+  if (valueChanged) {
+    return `Score unchanged at ${pctA}. Value changed from "${displayValueA}" to "${displayValueB}".`;
+  }
+
+  return `No change — score: ${pctA}.`;
+}
+
+/**
  * Compares two parsed reports and returns a structured comparison result.
  * @param {ReturnType<parseReport>} reportA
  * @param {ReturnType<parseReport>} reportB
@@ -103,17 +199,35 @@ function compareReports(reportA, reportB) {
       const scoreA = auditA ? auditA.score : null;
       const scoreB = auditB ? auditB.score : null;
       const title = (auditA || auditB).title;
+      const description = (auditA || auditB).description || '';
       const displayValueA = auditA ? auditA.displayValue || '' : '';
       const displayValueB = auditB ? auditB.displayValue || '' : '';
-      return {
+      const numericValueA =
+        auditA != null && auditA.numericValue != null ? auditA.numericValue : null;
+      const numericValueB =
+        auditB != null && auditB.numericValue != null ? auditB.numericValue : null;
+      const numericUnit = (auditA || auditB).numericUnit || '';
+      const explanation = auditB
+        ? auditB.explanation || ''
+        : auditA
+          ? auditA.explanation || ''
+          : '';
+      const delta = scoreDelta(scoreA, scoreB);
+      const entry = {
         id,
         title,
+        description,
+        explanation,
         scoreA,
         scoreB,
         displayValueA,
         displayValueB,
-        delta: scoreDelta(scoreA, scoreB),
+        numericValueA,
+        numericValueB,
+        numericUnit,
+        delta,
       };
+      return { ...entry, summary: describeChange(entry) };
     })
     .filter((a) => a.scoreA !== null || a.scoreB !== null);
 
@@ -181,6 +295,16 @@ function renderComparison(container, result, metaA, metaB) {
   const regressed = audits.filter((a) => a.delta.className === 'delta-negative').length;
   const unchanged = audits.filter((a) => a.delta.className === 'delta-neutral').length;
 
+  // Top 5 most impactful changes for the narrative section
+  const topChanged = audits
+    .filter((a) => a.delta.className !== 'delta-neutral')
+    .sort(
+      (a, b) =>
+        Math.abs(Math.round((b.scoreB - b.scoreA) * 100)) -
+        Math.abs(Math.round((a.scoreB - a.scoreA) * 100)),
+    )
+    .slice(0, 5);
+
   container.innerHTML = `
     <section class="meta-bar">
       <div class="meta-bar__item">
@@ -217,8 +341,27 @@ function renderComparison(container, result, metaA, metaB) {
       </div>
     </section>
 
+    ${
+      topChanged.length > 0
+        ? `<section class="notable-changes">
+      <h2 class="section-title">Notable Changes</h2>
+      <ul class="notable-changes__list">
+        ${topChanged
+          .map(
+            (a) => `<li class="notable-changes__item notable-changes__item--${a.delta.className === 'delta-positive' ? 'positive' : 'negative'}">
+            <span class="notable-changes__audit">${escapeHtml(a.title)}</span>
+            <span class="notable-changes__summary">${escapeHtml(a.summary)}</span>
+          </li>`,
+          )
+          .join('')}
+      </ul>
+    </section>`
+        : ''
+    }
+
     <section class="audits">
       <h2 class="section-title">Audit Comparison</h2>
+      <p class="audits__hint">Click <strong>▼</strong> on any row to expand its description and change summary.</p>
       <div class="audit-controls">
         <label class="filter-label">
           <span>Filter:</span>
@@ -262,20 +405,62 @@ function renderComparison(container, result, metaA, metaB) {
   function applyFilters() {
     const filterVal = filterEl.value;
     const searchVal = searchEl.value.toLowerCase();
-    Array.from(tbody.querySelectorAll('tr')).forEach((row) => {
-      const matchesFilter =
-        filterVal === 'all' || row.dataset.delta === filterVal;
+    Array.from(tbody.querySelectorAll('tr.audit-row')).forEach((row) => {
+      const matchesFilter = filterVal === 'all' || row.dataset.delta === filterVal;
       const matchesSearch = row.dataset.title.includes(searchVal);
-      row.hidden = !(matchesFilter && matchesSearch);
+      const visible = matchesFilter && matchesSearch;
+      row.hidden = !visible;
+      // Collapse and hide the associated detail row when the main row is filtered out
+      const detailRow = row.nextElementSibling;
+      if (detailRow && detailRow.classList.contains('audit-detail-row') && !visible) {
+        detailRow.hidden = true;
+        const expandBtn = row.querySelector('.audit-expand-btn');
+        if (expandBtn) {
+          expandBtn.setAttribute('aria-expanded', 'false');
+          expandBtn.textContent = '▼';
+        }
+      }
     });
   }
 
   filterEl.addEventListener('change', applyFilters);
   searchEl.addEventListener('input', applyFilters);
+
+  // Wire up expand/collapse buttons
+  tbody.addEventListener('click', (e) => {
+    const btn = e.target.closest('.audit-expand-btn');
+    if (!btn) return;
+    const row = btn.closest('tr.audit-row');
+    const detailRow = row.nextElementSibling;
+    if (!detailRow || !detailRow.classList.contains('audit-detail-row')) return;
+    const isExpanded = btn.getAttribute('aria-expanded') === 'true';
+    btn.setAttribute('aria-expanded', String(!isExpanded));
+    btn.textContent = isExpanded ? '▼' : '▲';
+    detailRow.hidden = isExpanded;
+  });
 }
 
 function renderCategoryCard(cat) {
   const { title, scoreA, scoreB, delta } = cat;
+
+  let summarySentence = '';
+  if (scoreA !== null && scoreB !== null) {
+    const pA = Math.round(scoreA * 100);
+    const pB = Math.round(scoreB * 100);
+    const pts = Math.abs(Math.round((scoreB - scoreA) * 100));
+    if (delta.className === 'delta-positive') {
+      summarySentence = `Improved by ${pts} point${pts !== 1 ? 's' : ''} (${pA} → ${pB})`;
+    } else if (delta.className === 'delta-negative') {
+      summarySentence = `Regressed by ${pts} point${pts !== 1 ? 's' : ''} (${pA} → ${pB})`;
+    } else {
+      summarySentence = `Score unchanged at ${pA}`;
+    }
+  } else if (scoreA === null && scoreB !== null) {
+    summarySentence = `New in Report B — ${Math.round(scoreB * 100)}`;
+  } else if (scoreB === null && scoreA !== null) {
+    summarySentence = 'Not in Report B';
+  }
+
   return `<div class="category-card">
     <h3 class="category-card__title">${escapeHtml(title)}</h3>
     <div class="category-card__scores">
@@ -289,13 +474,17 @@ function renderCategoryCard(cat) {
         ${renderGauge(scoreB)}
       </div>
     </div>
+    ${summarySentence ? `<p class="category-card__summary ${delta.className}">${escapeHtml(summarySentence)}</p>` : ''}
   </div>`;
 }
 
 function renderAuditRow(audit) {
-  const { title, scoreA, scoreB, displayValueA, displayValueB, delta } = audit;
-  return `<tr data-delta="${delta.className}" data-title="${escapeHtml(title.toLowerCase())}">
-    <td class="audit-table__name">${escapeHtml(title)}</td>
+  const { title, scoreA, scoreB, displayValueA, displayValueB, delta, description } = audit;
+  return `<tr class="audit-row" data-delta="${delta.className}" data-title="${escapeHtml(title.toLowerCase())}">
+    <td class="audit-table__name">
+      <button class="audit-expand-btn" aria-expanded="false" title="Show details">▼</button>
+      <span title="${escapeHtml(description)}">${escapeHtml(title)}</span>
+    </td>
     <td class="audit-table__score">
       <span class="score-badge score-badge--${getScoreClass(scoreA)}">${formatScore(scoreA)}</span>
     </td>
@@ -305,6 +494,18 @@ function renderAuditRow(audit) {
     </td>
     <td class="audit-table__value">${escapeHtml(displayValueB)}</td>
     <td class="audit-table__delta ${delta.className}">${delta.text}</td>
+  </tr>
+  ${renderAuditDetailRow(audit)}`;
+}
+
+function renderAuditDetailRow(audit) {
+  const { description, explanation, summary } = audit;
+  return `<tr class="audit-detail-row" hidden>
+    <td colspan="6" class="audit-detail-cell">
+      ${description ? `<p class="audit-detail__description">${escapeHtml(description)}</p>` : ''}
+      ${explanation ? `<p class="audit-detail__explanation"><strong>Explanation:</strong> ${escapeHtml(explanation)}</p>` : ''}
+      <p class="audit-detail__summary">${escapeHtml(summary)}</p>
+    </td>
   </tr>`;
 }
 
@@ -440,8 +641,10 @@ if (typeof module !== 'undefined') {
   module.exports = {
     parseReport,
     formatScore,
+    formatNumeric,
     getScoreClass,
     scoreDelta,
+    describeChange,
     compareReports,
     getCategoryForAudit,
     escapeHtml,

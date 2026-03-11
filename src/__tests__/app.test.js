@@ -3,8 +3,10 @@
 const {
   parseReport,
   formatScore,
+  formatNumeric,
   getScoreClass,
   scoreDelta,
+  describeChange,
   compareReports,
   getCategoryForAudit,
   escapeHtml,
@@ -29,13 +31,16 @@ function makeReport(overrides = {}) {
       'first-contentful-paint': {
         id: 'first-contentful-paint',
         title: 'First Contentful Paint',
+        description: 'First Contentful Paint marks the time at which the first text or image is painted.',
         score: 0.92,
         displayValue: '0.5 s',
         numericValue: 500,
+        numericUnit: 'millisecond',
       },
       'image-alt': {
         id: 'image-alt',
         title: 'Image elements have [alt] attributes',
+        description: 'Informative elements should aim for short, descriptive alternate text.',
         score: 1,
         displayValue: '',
       },
@@ -159,6 +164,131 @@ describe('scoreDelta', () => {
   });
 });
 
+// ── formatNumeric ─────────────────────────────────────────────────────────────
+
+describe('formatNumeric', () => {
+  it('formats milliseconds below 1 s', () => {
+    expect(formatNumeric(500, 'millisecond')).toBe('500 ms');
+    expect(formatNumeric(0, 'millisecond')).toBe('0 ms');
+  });
+
+  it('formats milliseconds >= 1000 as seconds', () => {
+    expect(formatNumeric(1500, 'millisecond')).toBe('1.5 s');
+    expect(formatNumeric(2000, 'millisecond')).toBe('2 s');
+    expect(formatNumeric(1234, 'millisecond')).toBe('1.23 s');
+  });
+
+  it('formats bytes', () => {
+    expect(formatNumeric(500, 'byte')).toBe('500 bytes');
+    expect(formatNumeric(1536, 'byte')).toBe('1.5 KB');
+    expect(formatNumeric(1572864, 'byte')).toBe('1.5 MB');
+  });
+
+  it('formats seconds', () => {
+    expect(formatNumeric(1.5, 'second')).toBe('1.5 s');
+    expect(formatNumeric(2, 'second')).toBe('2 s');
+  });
+
+  it('returns rounded value when unit is unknown or empty', () => {
+    expect(formatNumeric(42, '')).toBe('42');
+    expect(formatNumeric(3.7, 'unitless')).toBe('4 unitless');
+  });
+});
+
+// ── describeChange ────────────────────────────────────────────────────────────
+
+function makeAuditEntry(overrides = {}) {
+  const base = {
+    id: 'first-contentful-paint',
+    title: 'First Contentful Paint',
+    description: 'First Contentful Paint marks the time at which the first text or image is painted.',
+    explanation: '',
+    scoreA: 0.92,
+    scoreB: 0.98,
+    displayValueA: '0.5 s',
+    displayValueB: '0.3 s',
+    numericValueA: 500,
+    numericValueB: 300,
+    numericUnit: 'millisecond',
+    delta: scoreDelta(0.92, 0.98),
+    summary: '',
+  };
+  return { ...base, ...overrides };
+}
+
+describe('describeChange', () => {
+  it('describes a score improvement with metric delta', () => {
+    const audit = makeAuditEntry();
+    const result = describeChange(audit);
+    expect(result).toMatch(/Score improved by 6 point/);
+    expect(result).toMatch(/92 → 98/);
+    expect(result).toMatch(/500 ms → 300 ms/);
+  });
+
+  it('uses singular "point" for a 1-point change', () => {
+    const audit = makeAuditEntry({ scoreA: 0.92, scoreB: 0.93, numericValueA: null, numericValueB: null, delta: scoreDelta(0.92, 0.93) });
+    expect(describeChange(audit)).toMatch(/by 1 point \(/);
+  });
+
+  it('describes a score regression', () => {
+    const audit = makeAuditEntry({ scoreA: 0.98, scoreB: 0.72, delta: scoreDelta(0.98, 0.72) });
+    const result = describeChange(audit);
+    expect(result).toMatch(/Score regressed by 26 point/);
+    expect(result).toMatch(/98 → 72/);
+  });
+
+  it('describes no change with same score and no metric difference', () => {
+    const audit = makeAuditEntry({
+      scoreA: 0.8, scoreB: 0.8,
+      displayValueA: '1.0 s', displayValueB: '1.0 s',
+      numericValueA: 1000, numericValueB: 1000,
+      delta: scoreDelta(0.8, 0.8),
+    });
+    expect(describeChange(audit)).toMatch(/No change/);
+  });
+
+  it('describes a value-only change when score is unchanged', () => {
+    const audit = makeAuditEntry({
+      scoreA: 0.8, scoreB: 0.8,
+      displayValueA: '1.0 s', displayValueB: '1.2 s',
+      numericValueA: null, numericValueB: null,
+      delta: scoreDelta(0.8, 0.8),
+    });
+    expect(describeChange(audit)).toMatch(/Value changed from "1\.0 s" to "1\.2 s"/);
+  });
+
+  it('describes a new audit (only in Report B)', () => {
+    const audit = makeAuditEntry({ scoreA: null, delta: { text: '—', className: 'delta-neutral' } });
+    const result = describeChange(audit);
+    expect(result).toMatch(/New in Report B/);
+    expect(result).toMatch(/98/);
+  });
+
+  it('describes an audit removed from Report B', () => {
+    const audit = makeAuditEntry({ scoreB: null, delta: { text: '—', className: 'delta-neutral' } });
+    const result = describeChange(audit);
+    expect(result).toMatch(/Not present in Report B/);
+    expect(result).toMatch(/92/);
+  });
+
+  it('handles both scores being null', () => {
+    const audit = makeAuditEntry({ scoreA: null, scoreB: null, delta: { text: '—', className: 'delta-neutral' } });
+    expect(describeChange(audit)).toBe('Not applicable in either report.');
+  });
+
+  it('includes metric description when numericValues differ but score is neutral', () => {
+    const audit = makeAuditEntry({
+      scoreA: 0.8, scoreB: 0.8,
+      numericValueA: 1000, numericValueB: 800,
+      displayValueA: '1.0 s', displayValueB: '0.8 s',
+      delta: scoreDelta(0.8, 0.8),
+    });
+    const result = describeChange(audit);
+    expect(result).toMatch(/Score unchanged at 80/);
+    expect(result).toMatch(/1 s → 800 ms/);
+  });
+});
+
 // ── compareReports ────────────────────────────────────────────────────────────
 
 describe('compareReports', () => {
@@ -237,6 +367,30 @@ describe('compareReports', () => {
     const fcp = audits.find((a) => a.id === 'first-contentful-paint');
     expect(fcp.displayValueA).toBe('0.5 s');
     expect(fcp.displayValueB).toBe('0.3 s');
+  });
+
+  it('includes description and summary fields on each audit', () => {
+    const { audits } = compareReports(parsedA, parsedB);
+    audits.forEach((a) => {
+      expect(typeof a.description).toBe('string');
+      expect(typeof a.summary).toBe('string');
+      expect(a.summary.length).toBeGreaterThan(0);
+    });
+  });
+
+  it('extracts numericValue and numericUnit from audits', () => {
+    const { audits } = compareReports(parsedA, parsedB);
+    const fcp = audits.find((a) => a.id === 'first-contentful-paint');
+    expect(fcp.numericValueA).toBe(500);
+    expect(fcp.numericValueB).toBeNull();
+    expect(fcp.numericUnit).toBe('millisecond');
+  });
+
+  it('sets numericValueA/B to null when not present', () => {
+    const { audits } = compareReports(parsedA, parsedB);
+    const imageAlt = audits.find((a) => a.id === 'image-alt');
+    expect(imageAlt.numericValueA).toBeNull();
+    expect(imageAlt.numericValueB).toBeNull();
   });
 
   it('handles an audit present in only one report', () => {
